@@ -114,6 +114,11 @@ func ParsePartitionsMetrics(logger *logger.Logger) (map[string]*PartitionMetrics
 			nodeGpus := parseGpuCount(fields[2], partitionGpuRe)
 			allocatedGpus := parseGpuCount(fields[3], partitionGpuRe)
 
+			// Initialize partition if it doesn't exist yet
+			if partitions[partition] == nil {
+				partitions[partition] = &PartitionMetrics{}
+			}
+
 			partitions[partition].gpuIdle += numNodes * (nodeGpus - allocatedGpus)
 			partitions[partition].gpuAllocated += numNodes * allocatedGpus
 		}
