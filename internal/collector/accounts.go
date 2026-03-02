@@ -11,10 +11,10 @@ import (
 
 /*
 AccountsData executes the squeue command to retrieve job information by account.
-Expected squeue output format: "%A|%a|%T|%C|%b" (Job ID|Account|State|CPUs|TRES).
+Expected squeue output format: "%A|%a|%T|%D|%C|%b" (Job ID|Account|State|NumNodes|CPUs|TRES).
 */
 func AccountsData(logger *logger.Logger) ([]byte, error) {
-	return Execute(logger, "squeue", []string{"-a", "-r", "-h", "-o", "%A|%a|%T|%C|%b"})
+	return Execute(logger, "squeue", []string{"-a", "-r", "-h", "-o", "%A|%a|%T|%D|%C|%b"})
 }
 
 type JobMetrics struct {
@@ -27,7 +27,7 @@ type JobMetrics struct {
 
 /*
 ParseAccountsMetrics parses the output of the squeue command for account-specific job metrics.
-It expects input in the format: "JobID|Account|State|CPUs|TRES".
+It expects input in the format: "JobID|Account|State|NumNodes|CPUs|TRES".
 */
 func ParseAccountsMetrics(input []byte) map[string]*JobMetrics {
 	accounts := make(map[string]*JobMetrics)
@@ -35,6 +35,9 @@ func ParseAccountsMetrics(input []byte) map[string]*JobMetrics {
 	for _, line := range lines {
 		if strings.Contains(line, "|") {
 			fields := strings.Split(line, "|")
+			if len(fields) < 6 {
+				continue
+			}
 			account := fields[1]
 			_, key := accounts[account]
 			if !key {
@@ -42,7 +45,8 @@ func ParseAccountsMetrics(input []byte) map[string]*JobMetrics {
 			}
 			state := fields[2]
 			state = strings.ToLower(state)
-			cpus, _ := strconv.ParseFloat(fields[3], 64)
+			numNodes, _ := strconv.ParseFloat(fields[3], 64)
+			cpus, _ := strconv.ParseFloat(fields[4], 64)
 			pending := regexp.MustCompile(`^pending`)
 			running := regexp.MustCompile(`^running`)
 			suspended := regexp.MustCompile(`^suspended`)
@@ -52,12 +56,12 @@ func ParseAccountsMetrics(input []byte) map[string]*JobMetrics {
 			case running.MatchString(state):
 				accounts[account].running++
 				accounts[account].running_cpus += cpus
-				// Parse GPU count from TRES field (format: "gres/gpu=N" or "gres/gpu:type=N")
-				if len(fields) > 4 {
-					tres := fields[4]
-					gpus := parseGPUsFromTRES(tres)
-					accounts[account].running_gpus += gpus
-				}
+				// Parse GPU count from TRES field and multiply by number of nodes
+				// TRES shows GPUs per node, so we need to multiply by node count
+				tres := fields[5]
+				gpusPerNode := parseGPUsFromTRES(tres)
+				totalGPUs := gpusPerNode * numNodes
+				accounts[account].running_gpus += totalGPUs
 			case suspended.MatchString(state):
 				accounts[account].suspended++
 			}
