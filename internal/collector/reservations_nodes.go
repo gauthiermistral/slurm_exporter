@@ -10,12 +10,13 @@ import (
 
 // ReservationNodesMetrics holds node state counts per reservation
 type ReservationNodesMetrics struct {
-	alloc map[string]float64 // key: "pod|rack"
-	idle  map[string]float64
-	mix   map[string]float64
-	down  map[string]float64
-	drain map[string]float64
-	other map[string]float64
+	alloc   map[string]float64 // key: "pod|rack"
+	idle    map[string]float64
+	mix     map[string]float64
+	down    map[string]float64
+	drain   map[string]float64
+	other   map[string]float64
+	healthy map[string]float64 // alloc + idle + mix (excludes down/drain/other)
 }
 
 /*
@@ -56,12 +57,13 @@ func ParseReservationNodesMetrics(input []byte) map[string]*ReservationNodesMetr
 			// Initialize reservation if it doesn't exist
 			if reservations[currentReservation] == nil {
 				reservations[currentReservation] = &ReservationNodesMetrics{
-					alloc: make(map[string]float64),
-					idle:  make(map[string]float64),
-					mix:   make(map[string]float64),
-					down:  make(map[string]float64),
-					drain: make(map[string]float64),
-					other: make(map[string]float64),
+					alloc:   make(map[string]float64),
+					idle:    make(map[string]float64),
+					mix:     make(map[string]float64),
+					down:    make(map[string]float64),
+					drain:   make(map[string]float64),
+					other:   make(map[string]float64),
+					healthy: make(map[string]float64),
 				}
 			}
 
@@ -76,14 +78,21 @@ func ParseReservationNodesMetrics(input []byte) map[string]*ReservationNodesMetr
 			mixRe := regexp.MustCompile(`^mix`)
 			downRe := regexp.MustCompile(`^down`)
 			drainRe := regexp.MustCompile(`^drain`)
+			plannedRe := regexp.MustCompile(`^planned`)
 
 			switch {
 			case allocRe.MatchString(state):
 				reservations[currentReservation].alloc[key]++
+				reservations[currentReservation].healthy[key]++
 			case idleRe.MatchString(state):
 				reservations[currentReservation].idle[key]++
+				reservations[currentReservation].healthy[key]++
 			case mixRe.MatchString(state):
 				reservations[currentReservation].mix[key]++
+				reservations[currentReservation].healthy[key]++
+			case plannedRe.MatchString(state):
+				reservations[currentReservation].other[key]++
+				reservations[currentReservation].healthy[key]++
 			case downRe.MatchString(state):
 				reservations[currentReservation].down[key]++
 			case drainRe.MatchString(state):
@@ -153,25 +162,27 @@ func ReservationNodesGetMetrics(logger *logger.Logger) (map[string]*ReservationN
 func NewReservationNodesCollector(logger *logger.Logger) *ReservationNodesCollector {
 	labels := []string{"reservation", "pod", "rack"}
 	return &ReservationNodesCollector{
-		alloc:  prometheus.NewDesc("slurm_reservation_nodes_alloc", "Allocated nodes in reservation", labels, nil),
-		idle:   prometheus.NewDesc("slurm_reservation_nodes_idle", "Idle nodes in reservation", labels, nil),
-		mix:    prometheus.NewDesc("slurm_reservation_nodes_mix", "Mixed nodes in reservation", labels, nil),
-		down:   prometheus.NewDesc("slurm_reservation_nodes_down", "Down nodes in reservation", labels, nil),
-		drain:  prometheus.NewDesc("slurm_reservation_nodes_drain", "Drained nodes in reservation", labels, nil),
-		other:  prometheus.NewDesc("slurm_reservation_nodes_other", "Other state nodes in reservation", labels, nil),
-		logger: logger,
+		alloc:   prometheus.NewDesc("slurm_reservation_nodes_alloc", "Allocated nodes in reservation", labels, nil),
+		idle:    prometheus.NewDesc("slurm_reservation_nodes_idle", "Idle nodes in reservation", labels, nil),
+		mix:     prometheus.NewDesc("slurm_reservation_nodes_mix", "Mixed nodes in reservation", labels, nil),
+		down:    prometheus.NewDesc("slurm_reservation_nodes_down", "Down nodes in reservation", labels, nil),
+		drain:   prometheus.NewDesc("slurm_reservation_nodes_drain", "Drained nodes in reservation", labels, nil),
+		other:   prometheus.NewDesc("slurm_reservation_nodes_other", "Other state nodes in reservation", labels, nil),
+		healthy: prometheus.NewDesc("slurm_reservation_nodes_healthy", "Healthy nodes in reservation (alloc+idle+mix+planned)", labels, nil),
+		logger:  logger,
 	}
 }
 
 // ReservationNodesCollector implements the Prometheus Collector interface
 type ReservationNodesCollector struct {
-	alloc  *prometheus.Desc
-	idle   *prometheus.Desc
-	mix    *prometheus.Desc
-	down   *prometheus.Desc
-	drain  *prometheus.Desc
-	other  *prometheus.Desc
-	logger *logger.Logger
+	alloc   *prometheus.Desc
+	idle    *prometheus.Desc
+	mix     *prometheus.Desc
+	down    *prometheus.Desc
+	drain   *prometheus.Desc
+	other   *prometheus.Desc
+	healthy *prometheus.Desc
+	logger  *logger.Logger
 }
 
 // Describe sends the descriptors of each metric over to the provided channel
@@ -182,6 +193,7 @@ func (rnc *ReservationNodesCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- rnc.down
 	ch <- rnc.drain
 	ch <- rnc.other
+	ch <- rnc.healthy
 }
 
 // Collect fetches the node metrics by reservation and sends them to Prometheus
@@ -239,6 +251,14 @@ func (rnc *ReservationNodesCollector) Collect(ch chan<- prometheus.Metric) {
 				parts := strings.Split(key, "|")
 				if len(parts) == 2 {
 					ch <- prometheus.MustNewConstMetric(rnc.other, prometheus.GaugeValue, count, reservation, parts[0], parts[1])
+				}
+			}
+		}
+		for key, count := range rm.healthy {
+			if count > 0 {
+				parts := strings.Split(key, "|")
+				if len(parts) == 2 {
+					ch <- prometheus.MustNewConstMetric(rnc.healthy, prometheus.GaugeValue, count, reservation, parts[0], parts[1])
 				}
 			}
 		}
