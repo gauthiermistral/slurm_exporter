@@ -69,13 +69,16 @@ func ParseAccountsMetrics(input []byte) map[string]*JobMetrics {
 /*
 parseGPUsFromTRES extracts the GPU count from TRES string.
 Expected formats:
-  - "gres/gpu=4"
-  - "gres/gpu:a100=2"
-  - "billing=10,cpu=8,gres/gpu=4,mem=32G,node=1"
+  - "gres/gpu:4" (simple format)
+  - "gres/gpu:a100:2" (with GPU type)
+  - "gres/gpu=4" (alternative format)
+  - "gres/gpu:a100=2" (mixed format)
+  - "billing=10,cpu=8,gres/gpu:4,mem=32G,node=1" (full TRES)
 */
 func parseGPUsFromTRES(tres string) float64 {
-	// Match gres/gpu or gres/gpu:type patterns followed by =number
-	re := regexp.MustCompile(`gres/gpu[^=]*=(\d+)`)
+	// Match gres/gpu followed by colon or equals and a number
+	// Handles: gres/gpu:4, gres/gpu:a100:2, gres/gpu=4, gres/gpu:a100=2
+	re := regexp.MustCompile(`gres/gpu[^,\s]*[:\=](\d+)`)
 	matches := re.FindStringSubmatch(tres)
 	if len(matches) > 1 {
 		count, err := strconv.ParseFloat(matches[1], 64)
