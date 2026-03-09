@@ -81,34 +81,44 @@ func ParseReservationNodesMetrics(input []byte) map[string]*ReservationNodesMetr
 			plannedRe := regexp.MustCompile(`^planned`)
 			reservedRe := regexp.MustCompile(`resv|reserved`)
 
-			// Special handling for reserved nodes: only healthy in "prod" reservation
+			// Determine if node should be counted as healthy
+			// Reserved nodes are only healthy in "prod" reservation
+			isHealthy := false
 			if reservedRe.MatchString(state) {
-				reservations[currentReservation].other[key]++
-				// Reserved nodes are only healthy in "prod" reservation
-				if currentReservation == "prod" {
-					reservations[currentReservation].healthy[key]++
-				}
+				isHealthy = (currentReservation == "prod")
 			} else {
-				switch {
-				case allocRe.MatchString(state):
-					reservations[currentReservation].alloc[key]++
+				// Non-reserved nodes follow normal healthy rules
+				isHealthy = true
+			}
+
+			// Categorize based on primary state
+			switch {
+			case allocRe.MatchString(state):
+				reservations[currentReservation].alloc[key]++
+				if isHealthy {
 					reservations[currentReservation].healthy[key]++
-				case idleRe.MatchString(state):
-					reservations[currentReservation].idle[key]++
-					reservations[currentReservation].healthy[key]++
-				case mixRe.MatchString(state):
-					reservations[currentReservation].mix[key]++
-					reservations[currentReservation].healthy[key]++
-				case plannedRe.MatchString(state):
-					reservations[currentReservation].other[key]++
-					reservations[currentReservation].healthy[key]++
-				case downRe.MatchString(state):
-					reservations[currentReservation].down[key]++
-				case drainRe.MatchString(state):
-					reservations[currentReservation].drain[key]++
-				default:
-					reservations[currentReservation].other[key]++
 				}
+			case idleRe.MatchString(state):
+				reservations[currentReservation].idle[key]++
+				if isHealthy {
+					reservations[currentReservation].healthy[key]++
+				}
+			case mixRe.MatchString(state):
+				reservations[currentReservation].mix[key]++
+				if isHealthy {
+					reservations[currentReservation].healthy[key]++
+				}
+			case plannedRe.MatchString(state):
+				reservations[currentReservation].other[key]++
+				if isHealthy {
+					reservations[currentReservation].healthy[key]++
+				}
+			case downRe.MatchString(state):
+				reservations[currentReservation].down[key]++
+			case drainRe.MatchString(state):
+				reservations[currentReservation].drain[key]++
+			default:
+				reservations[currentReservation].other[key]++
 			}
 		}
 	}
