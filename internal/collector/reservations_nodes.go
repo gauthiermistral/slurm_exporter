@@ -79,26 +79,36 @@ func ParseReservationNodesMetrics(input []byte) map[string]*ReservationNodesMetr
 			downRe := regexp.MustCompile(`^down`)
 			drainRe := regexp.MustCompile(`^drain`)
 			plannedRe := regexp.MustCompile(`^planned`)
+			reservedRe := regexp.MustCompile(`resv|reserved`)
 
-			switch {
-			case allocRe.MatchString(state):
-				reservations[currentReservation].alloc[key]++
-				reservations[currentReservation].healthy[key]++
-			case idleRe.MatchString(state):
-				reservations[currentReservation].idle[key]++
-				reservations[currentReservation].healthy[key]++
-			case mixRe.MatchString(state):
-				reservations[currentReservation].mix[key]++
-				reservations[currentReservation].healthy[key]++
-			case plannedRe.MatchString(state):
+			// Special handling for reserved nodes: only healthy in "prod" reservation
+			if reservedRe.MatchString(state) {
 				reservations[currentReservation].other[key]++
-				reservations[currentReservation].healthy[key]++
-			case downRe.MatchString(state):
-				reservations[currentReservation].down[key]++
-			case drainRe.MatchString(state):
-				reservations[currentReservation].drain[key]++
-			default:
-				reservations[currentReservation].other[key]++
+				// Reserved nodes are only healthy in "prod" reservation
+				if currentReservation == "prod" {
+					reservations[currentReservation].healthy[key]++
+				}
+			} else {
+				switch {
+				case allocRe.MatchString(state):
+					reservations[currentReservation].alloc[key]++
+					reservations[currentReservation].healthy[key]++
+				case idleRe.MatchString(state):
+					reservations[currentReservation].idle[key]++
+					reservations[currentReservation].healthy[key]++
+				case mixRe.MatchString(state):
+					reservations[currentReservation].mix[key]++
+					reservations[currentReservation].healthy[key]++
+				case plannedRe.MatchString(state):
+					reservations[currentReservation].other[key]++
+					reservations[currentReservation].healthy[key]++
+				case downRe.MatchString(state):
+					reservations[currentReservation].down[key]++
+				case drainRe.MatchString(state):
+					reservations[currentReservation].drain[key]++
+				default:
+					reservations[currentReservation].other[key]++
+				}
 			}
 		}
 	}
